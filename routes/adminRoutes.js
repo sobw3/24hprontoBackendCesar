@@ -62,6 +62,8 @@ router.get('/users-by-condo', protectAdmin, adminController.getUsersByCondo);
 router.put('/users/:id', protectAdmin, adminController.updateUserByAdmin);
 router.post('/users/:id/add-balance', protectAdmin, adminController.addWalletBalanceByAdmin);
 router.post('/users/:id/toggle-status', protectAdmin, adminController.toggleUserStatus);
+router.get('/users', adminController.getUsers);
+router.patch('/users/:id/status', adminController.toggleUserStatus);
 
 // --- SUPORTE (TICKETS) ---
 router.post('/users/:userId/tickets', protectAdmin, ticketController.createTicketForUser);
