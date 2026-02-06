@@ -1664,3 +1664,49 @@ exports.getFinancialStats = async (req, res) => {
         res.status(500).json({ message: 'Erro interno' });
     }
 };
+
+exports.getUsers = async (req, res) => {
+    try {
+        // Busca usuários e traz o nome do condomínio junto
+        const query = `
+            SELECT 
+                u.id, u.name, u.email, u.cpf, u.phone, u.role, u.active, u.created_at,
+                c.name as condo_name, c.id as condo_id
+            FROM users u
+            LEFT JOIN condominiums c ON u.condo_id = c.id
+            ORDER BY u.created_at DESC;
+        `;
+        const result = await pool.query(query);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Erro ao buscar usuários:', error);
+        res.status(500).json({ message: 'Erro ao listar usuários.' });
+    }
+};
+
+// 2. ALTERAR STATUS (BLOQUEAR/DESBLOQUEAR)
+exports.toggleUserStatus = async (req, res) => {
+    const { id } = req.params;
+    try {
+        // Inverte o status atual (se true vira false, se false vira true)
+        const query = `
+            UPDATE users 
+            SET active = NOT active 
+            WHERE id = $1 
+            RETURNING id, name, active;
+        `;
+        const result = await pool.query(query, [id]);
+        
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: 'Usuário não encontrado.' });
+        }
+
+        const user = result.rows[0];
+        const status = user.active ? 'desbloqueado' : 'bloqueado';
+        res.json({ message: `Usuário ${user.name} foi ${status}.`, user });
+
+    } catch (error) {
+        console.error('Erro ao alterar status:', error);
+        res.status(500).json({ message: 'Erro ao alterar status do usuário.' });
+    }
+};
