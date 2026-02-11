@@ -1760,3 +1760,105 @@ exports.registerPurchase = async (req, res) => {
         client.release();
     }
 };
+
+// =================================================================
+// FASE 3: ABASTECIMENTO FÍSICO E AUDITORIA (BLIND RECEIVING)
+// =================================================================
+
+// 1. Busca as reposições que estão pendentes (a caminho da máquina)
+exports.getPendingRestocks = async (req, res) => {
+    const { condoId } = req.query;
+    try {
+        let query = `
+            SELECT pr.*, c.name as condo_name 
+            FROM pending_restocks pr
+            LEFT JOIN condominiums c ON pr.condo_id = c.id
+            WHERE pr.status = 'pending'
+        `;
+        let values = [];
+        
+        if (condoId && condoId !== 'all') {
+            query += ` AND pr.condo_id = $1`;
+            values.push(condoId);
+        }
+        
+        query += ` ORDER BY pr.created_at ASC`;
+        
+        const { rows: sessions } = await pool.query(query, values);
+
+        // Para cada sessão de compra, busca os itens exatos e a expectativa de estoque
+        for (let session of sessions) {
+            const { rows: items } = await pool.query(`
+                SELECT 
+                    pri.*, 
+                    p.name, 
+                    p.image_url, 
+                    COALESCE(i.quantity, 0) as expected_current_stock
+                FROM pending_restock_items pri
+                JOIN products p ON pri.product_id = p.id
+                LEFT JOIN inventory i ON pri.product_id = i.product_id AND i.condo_id = $1
+                WHERE pri.pending_restock_id = $2
+            `, [session.condo_id, session.id]);
+            
+            session.items = items;
+        }
+
+        res.status(200).json(sessions);
+    } catch (error) {
+        console.error('Erro ao buscar reposições pendentes:', error);
+        res.status(500).json({ message: 'Erro ao buscar reposições pendentes.' });
+    }
+};
+
+// 2. Executa a contagem cega, gera auditoria e atualiza o estoque final
+exports.executePhysicalRestock = async (req, res) => {
+    // items virá do frontend como um array: [{ product_id, bought_qty, counted_qty, expected_qty }]
+    const { pending_restock_id, condo_id, items } = req.body;
+    const client = await pool.connect();
+    
+    try {
+        await client.query('BEGIN');
+        
+        for (let item of items) {
+            // Diferença = O que você contou na máquina - O que o sistema achava que tinha
+            // Ex: Contou 3, mas o sistema esperava 5 -> Diferença = -2 (Furtos/Erro)
+            const diff = item.counted_qty - item.expected_qty; 
+            
+            // 1. Se houver diferença, grava na tabela de Auditoria (Lista Negra)
+            if (diff !== 0) {
+                await client.query(
+                    `INSERT INTO stock_audits (condo_id, product_id, expected_quantity, actual_quantity, difference_quantity)
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [condo_id, item.product_id, item.expected_qty, item.counted_qty, diff]
+                );
+            }
+
+            // 2. Atualiza o inventário REAL
+            // O novo estoque oficial é: O que você fisicamente contou + O que você acabou de comprar e colocar lá dentro
+            const finalStock = item.counted_qty + item.bought_qty;
+
+            await client.query(
+                `INSERT INTO inventory (condo_id, product_id, quantity, last_updated)
+                 VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT (condo_id, product_id)
+                 DO UPDATE SET quantity = EXCLUDED.quantity, last_updated = NOW()`,
+                [condo_id, item.product_id, finalStock]
+            );
+        }
+
+        // 3. Marca a sessão de compras pendente como concluída
+        await client.query(
+            `UPDATE pending_restocks SET status = 'completed' WHERE id = $1`,
+            [pending_restock_id]
+        );
+
+        await client.query('COMMIT');
+        res.status(200).json({ success: true, message: 'Abastecimento físico concluído e auditoria registrada!' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Erro ao executar abastecimento físico:', error);
+        res.status(500).json({ message: 'Erro ao finalizar abastecimento.' });
+    } finally {
+        client.release();
+    }
+};
