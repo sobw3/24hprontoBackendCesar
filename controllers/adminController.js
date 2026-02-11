@@ -1889,3 +1889,57 @@ exports.getStockAudits = async (req, res) => {
         res.status(500).json({ message: 'Erro ao buscar auditorias de estoque.' });
     }
 };
+
+// 4. Detalhes da Auditoria (Investigação de Furtos)
+exports.getAuditDetails = async (req, res) => {
+    const { auditId } = req.params;
+    
+    try {
+        // 1. Pega os dados da auditoria atual para saber o Produto, a Máquina e a Data do flagrante
+        const auditResult = await pool.query(`SELECT * FROM stock_audits WHERE id = $1`, [auditId]);
+        if (auditResult.rows.length === 0) return res.status(404).json({ message: 'Auditoria não encontrada' });
+        
+        const currentAudit = auditResult.rows[0];
+
+        // 2. Descobre quando foi a ÚLTIMA vez que esse produto foi auditado ou abastecido ANTES disso
+        // Isso define o "Inicio da Janela de Suspeita"
+        const previousEvent = await pool.query(`
+            SELECT created_at FROM stock_audits 
+            WHERE condo_id = $1 AND product_id = $2 AND created_at < $3
+            ORDER BY created_at DESC LIMIT 1
+        `, [currentAudit.condo_id, currentAudit.product_id, currentAudit.created_at]);
+
+        // Se não tiver histórico anterior, pega os últimos 30 dias como padrão
+        const startDate = previousEvent.rows.length > 0 ? previousEvent.rows[0].created_at : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+        // 3. Busca todas as vendas (Orders) desse produto nessa janela de tempo
+        const suspects = await pool.query(`
+            SELECT 
+                u.name as user_name,
+                o.created_at as sale_date,
+                oi.quantity,
+                oi.unit_price
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.id
+            JOIN users u ON o.user_id = u.id
+            WHERE 
+                o.condo_id = $1 
+                AND oi.product_id = $2
+                AND o.created_at >= $3 
+                AND o.created_at <= $4
+                AND o.status = 'paid'
+            ORDER BY o.created_at DESC
+        `, [currentAudit.condo_id, currentAudit.product_id, startDate, currentAudit.created_at]);
+
+        res.json({
+            audit: currentAudit,
+            window_start: startDate,
+            window_end: currentAudit.created_at,
+            sales: suspects.rows
+        });
+
+    } catch (error) {
+        console.error('Erro ao buscar detalhes da auditoria:', error);
+        res.status(500).json({ message: 'Erro interno ao investigar inconsistência.' });
+    }
+};
