@@ -1718,40 +1718,45 @@ exports.registerPurchase = async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // 1. Grava o resumo financeiro da ida ao fornecedor
+        // 1. Grava o resumo financeiro no histórico (Mantém a aba de Histórico a funcionar normalmente)
         await client.query(
             'INSERT INTO purchase_history (condo_id, date, total_spent, total_savings) VALUES ($1, $2, $3, $4)',
             [condo_id, date, total_spent, total_savings]
         );
 
-        // 2. Atualiza o preço base do produto e injeta as unidades na máquina
+        // 2. Cria a sessão de reposição pendente (O "Carrinho do Fornecedor" que vai viajar até à máquina)
+        const pendingResult = await client.query(
+            `INSERT INTO pending_restocks (condo_id, total_spent, total_savings, status) 
+             VALUES ($1, $2, $3, 'pending') RETURNING id`,
+            [condo_id, total_spent, total_savings]
+        );
+        const pendingId = pendingResult.rows[0].id;
+
+        // 3. Atualiza o preço base e guarda os itens pendentes (ATENÇÃO: JÁ NÃO SOMA NO INVENTORY)
         for (let item of items) {
-            // Atualiza o custo do produto no sistema geral
+            // Atualiza o custo do produto globalmente para os relatórios financeiros
             await client.query(
                 'UPDATE products SET purchase_price = $1 WHERE id = $2',
                 [item.new_price, item.product_id]
             );
             
-            // Só adiciona a quantidade física se estiver a abastecer uma máquina específica
+            // Guarda o item na lista de pendentes para a conferência visual na máquina
             if (condo_id && condo_id !== 'all') {
                 await client.query(
-                    `INSERT INTO inventory (condo_id, product_id, quantity, last_updated)
-                     VALUES ($1, $2, $3, NOW())
-                     ON CONFLICT (condo_id, product_id)
-                     DO UPDATE SET quantity = inventory.quantity + EXCLUDED.quantity, last_updated = NOW()`,
-                    [condo_id, item.product_id, item.quantity]
+                    `INSERT INTO pending_restock_items (pending_restock_id, product_id, quantity, purchase_price)
+                     VALUES ($1, $2, $3, $4)`,
+                    [pendingId, item.product_id, item.quantity, item.new_price]
                 );
             }
         }
 
         await client.query('COMMIT');
-        res.status(200).json({ success: true, message: 'Reposição gravada com sucesso!' });
+        res.status(200).json({ success: true, message: 'Compras registadas! A aguardar abastecimento físico na máquina.' });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('Erro ao guardar compras:', error);
-        res.status(500).json({ message: 'Erro ao registar reposição no inventário.' });
+        console.error('Erro ao registar compras pendentes:', error);
+        res.status(500).json({ message: 'Erro ao registar reposição pendente no sistema.' });
     } finally {
         client.release();
     }
 };
-
