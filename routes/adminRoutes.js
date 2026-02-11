@@ -35,6 +35,7 @@ router.get('/purchase-history', adminController.getPurchaseHistory);
 router.post('/inventory/purchase', adminController.registerPurchase);
 router.get('/inventory/pending-restocks', adminController.getPendingRestocks);
 router.post('/inventory/execute-restock', adminController.executePhysicalRestock);
+router.get('/inventory/audits', adminController.getStockAudits);
 
 // --- FINANCEIRO ---
 router.get('/financial/stats', protectAdmin, adminController.getFinancialStats);
