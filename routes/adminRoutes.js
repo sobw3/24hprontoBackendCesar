@@ -31,6 +31,8 @@ router.delete('/condominiums/:id', protectAdmin, adminController.deleteCondomini
 router.get('/inventory', protectAdmin, adminController.getInventoryByCondo);
 router.post('/inventory/bulk-update', protectAdmin, adminController.bulkUpdateInventory);
 router.get('/inventory/expiring', protectAdmin, adminController.getExpiringProducts);
+router.get('/purchase-history', adminController.getPurchaseHistory);
+router.post('/inventory/purchase', adminController.registerPurchase);
 
 // --- FINANCEIRO ---
 router.get('/financial/stats', protectAdmin, adminController.getFinancialStats);
