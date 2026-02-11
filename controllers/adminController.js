@@ -1693,6 +1693,8 @@ exports.getFinancialStats = async (req, res) => {
 exports.getPurchaseHistory = async (req, res) => {
     try {
         const { condoId } = req.query;
+        
+        // 1. Busca as sessões de compra (cabeçalho)
         let query = `
             SELECT pr.*, c.name as condo_name 
             FROM pending_restocks pr
@@ -1701,8 +1703,7 @@ exports.getPurchaseHistory = async (req, res) => {
         `;
         let values = [];
 
-        // Correção do "Modo Geral": Se for 'all', não filtra nada (traz tudo).
-        // Se for um ID específico, filtra só aquele condomínio.
+        // Correção do filtro: Se for 'all', não adiciona WHERE, traz tudo.
         if (condoId && condoId !== 'all') {
             query += ` AND pr.condo_id = $1`;
             values.push(condoId);
@@ -1712,7 +1713,7 @@ exports.getPurchaseHistory = async (req, res) => {
 
         const { rows: sessions } = await pool.query(query, values);
 
-        // Agora buscamos os ITENS de cada compra para mostrar os detalhes
+        // 2. Busca os produtos (itens) de cada sessão para mostrar os detalhes
         for (let session of sessions) {
             const itemsQuery = `
                 SELECT 
