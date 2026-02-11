@@ -127,20 +127,44 @@ exports.deleteCondominium = async (req, res) => {
 
 exports.getProducts = async (req, res) => {
     try {
-        // --- CORREÇÃO: Adicionado 'WHERE p.is_archived = false' ---
-        const query = `
-            SELECT 
-                p.*, 
-                COALESCE(SUM(i.quantity), 0)::int AS global_stock
-            FROM products p
-            LEFT JOIN inventory i ON p.id = i.product_id
-            WHERE p.is_archived = false
-            GROUP BY p.id
-            ORDER BY p.name ASC;
-        `;
-        const allProducts = await pool.query(query);
+        const { condoId } = req.query;
+        let query = '';
+        let values = [];
+
+        if (condoId && condoId !== 'all') {
+            // Busca produtos para uma máquina específica (com validade e stock exato)
+            query = `
+                SELECT 
+                    p.*, 
+                    COALESCE(i.quantity, 0)::int AS global_stock,
+                    i.nearest_expiration_date
+                FROM products p
+                LEFT JOIN inventory i ON p.id = i.product_id AND i.condo_id = $1
+                WHERE p.is_archived = false
+                ORDER BY p.name ASC;
+            `;
+            values.push(condoId);
+        } else {
+            // Busca Geral (Soma todos os stocks e pega a validade mais próxima)
+            query = `
+                SELECT 
+                    p.*, 
+                    COALESCE(SUM(i.quantity), 0)::int AS global_stock,
+                    MIN(i.nearest_expiration_date) AS nearest_expiration_date
+                FROM products p
+                LEFT JOIN inventory i ON p.id = i.product_id
+                WHERE p.is_archived = false
+                GROUP BY p.id
+                ORDER BY p.name ASC;
+            `;
+        }
+
+        const allProducts = await pool.query(query, values);
         res.status(200).json(allProducts.rows);
-    } catch (error) { res.status(500).json({ message: error.message }); }
+    } catch (error) { 
+        console.error("Erro em getProducts:", error);
+        res.status(500).json({ message: error.message }); 
+    }
 };
 
 exports.createProduct = async (req, res) => {
@@ -1665,4 +1689,69 @@ exports.getFinancialStats = async (req, res) => {
     }
 };
 
+
+exports.getPurchaseHistory = async (req, res) => {
+    try {
+        const { condoId } = req.query;
+        let query = 'SELECT * FROM purchase_history';
+        let values = [];
+
+        if (condoId && condoId !== 'all') {
+            query += ' WHERE condo_id = $1 OR condo_id IS NULL';
+            values.push(condoId);
+        }
+
+        query += ' ORDER BY date DESC, created_at DESC';
+
+        const result = await pool.query(query, values);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erro ao buscar histórico de compras:', error);
+        res.status(500).json({ message: 'Erro interno no servidor' });
+    }
+};
+
+exports.registerPurchase = async (req, res) => {
+    const { condo_id, date, total_spent, total_savings, items } = req.body;
+    const client = await pool.connect();
+    
+    try {
+        await client.query('BEGIN');
+
+        // 1. Grava o resumo financeiro da ida ao fornecedor
+        await client.query(
+            'INSERT INTO purchase_history (condo_id, date, total_spent, total_savings) VALUES ($1, $2, $3, $4)',
+            [condo_id, date, total_spent, total_savings]
+        );
+
+        // 2. Atualiza o preço base do produto e injeta as unidades na máquina
+        for (let item of items) {
+            // Atualiza o custo do produto no sistema geral
+            await client.query(
+                'UPDATE products SET purchase_price = $1 WHERE id = $2',
+                [item.new_price, item.product_id]
+            );
+            
+            // Só adiciona a quantidade física se estiver a abastecer uma máquina específica
+            if (condo_id && condo_id !== 'all') {
+                await client.query(
+                    `INSERT INTO inventory (condo_id, product_id, quantity, last_updated)
+                     VALUES ($1, $2, $3, NOW())
+                     ON CONFLICT (condo_id, product_id)
+                     DO UPDATE SET quantity = inventory.quantity + EXCLUDED.quantity, last_updated = NOW()`,
+                    [condo_id, item.product_id, item.quantity]
+                );
+            }
+        }
+
+        await client.query('COMMIT');
+        res.status(200).json({ success: true, message: 'Reposição gravada com sucesso!' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Erro ao guardar compras:', error);
+        res.status(500).json({ message: 'Erro ao registar reposição no inventário.' });
+    } finally {
+        client.release();
+    }
+};
 
