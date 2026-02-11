@@ -33,6 +33,8 @@ router.post('/inventory/bulk-update', protectAdmin, adminController.bulkUpdateIn
 router.get('/inventory/expiring', protectAdmin, adminController.getExpiringProducts);
 router.get('/purchase-history', adminController.getPurchaseHistory);
 router.post('/inventory/purchase', adminController.registerPurchase);
+router.get('/inventory/pending-restocks', adminController.getPendingRestocks);
+router.post('/inventory/execute-restock', adminController.executePhysicalRestock);
 
 // --- FINANCEIRO ---
 router.get('/financial/stats', protectAdmin, adminController.getFinancialStats);
