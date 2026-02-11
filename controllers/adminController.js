@@ -1693,20 +1693,43 @@ exports.getFinancialStats = async (req, res) => {
 exports.getPurchaseHistory = async (req, res) => {
     try {
         const { condoId } = req.query;
-        let query = 'SELECT * FROM purchase_history';
+        let query = `
+            SELECT pr.*, c.name as condo_name 
+            FROM pending_restocks pr
+            LEFT JOIN condominiums c ON pr.condo_id = c.id
+            WHERE 1=1
+        `;
         let values = [];
 
+        // Correção do "Modo Geral": Se for 'all', não filtra nada (traz tudo).
+        // Se for um ID específico, filtra só aquele condomínio.
         if (condoId && condoId !== 'all') {
-            query += ' WHERE condo_id = $1 OR condo_id IS NULL';
+            query += ` AND pr.condo_id = $1`;
             values.push(condoId);
         }
 
-        query += ' ORDER BY date DESC, created_at DESC';
+        query += ' ORDER BY pr.created_at DESC';
 
-        const result = await pool.query(query, values);
-        res.json(result.rows);
+        const { rows: sessions } = await pool.query(query, values);
+
+        // Agora buscamos os ITENS de cada compra para mostrar os detalhes
+        for (let session of sessions) {
+            const itemsQuery = `
+                SELECT 
+                    pri.*, 
+                    p.name, 
+                    p.image_url 
+                FROM pending_restock_items pri
+                JOIN products p ON pri.product_id = p.id
+                WHERE pri.pending_restock_id = $1
+            `;
+            const { rows: items } = await pool.query(itemsQuery, [session.id]);
+            session.items = items;
+        }
+
+        res.json(sessions);
     } catch (error) {
-        console.error('Erro ao buscar histórico de compras:', error);
+        console.error('Erro ao buscar histórico detalhado:', error);
         res.status(500).json({ message: 'Erro interno no servidor' });
     }
 };
