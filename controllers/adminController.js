@@ -1718,13 +1718,13 @@ exports.registerPurchase = async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // 1. Grava o resumo financeiro no histórico (Mantém a aba de Histórico a funcionar normalmente)
+        // 1. Grava o resumo financeiro no histórico
         await client.query(
             'INSERT INTO purchase_history (condo_id, date, total_spent, total_savings) VALUES ($1, $2, $3, $4)',
             [condo_id, date, total_spent, total_savings]
         );
 
-        // 2. Cria a sessão de reposição pendente (O "Carrinho do Fornecedor" que vai viajar até à máquina)
+        // 2. Cria a sessão de reposição pendente
         const pendingResult = await client.query(
             `INSERT INTO pending_restocks (condo_id, total_spent, total_savings, status) 
              VALUES ($1, $2, $3, 'pending') RETURNING id`,
@@ -1732,22 +1732,18 @@ exports.registerPurchase = async (req, res) => {
         );
         const pendingId = pendingResult.rows[0].id;
 
-        // 3. Atualiza o preço base e guarda os itens pendentes (ATENÇÃO: JÁ NÃO SOMA NO INVENTORY)
+        // 3. Salva TODOS os itens comprados na sessão
         for (let item of items) {
-            // Atualiza o custo do produto globalmente para os relatórios financeiros
             await client.query(
                 'UPDATE products SET purchase_price = $1 WHERE id = $2',
                 [item.new_price, item.product_id]
             );
             
-            // Guarda o item na lista de pendentes para a conferência visual na máquina
-            if (condo_id && condo_id !== 'all') {
-                await client.query(
-                    `INSERT INTO pending_restock_items (pending_restock_id, product_id, quantity, purchase_price)
-                     VALUES ($1, $2, $3, $4)`,
-                    [pendingId, item.product_id, item.quantity, item.new_price]
-                );
-            }
+            await client.query(
+                `INSERT INTO pending_restock_items (pending_restock_id, product_id, quantity, purchase_price)
+                 VALUES ($1, $2, $3, $4)`,
+                [pendingId, item.product_id, item.quantity, item.new_price]
+            );
         }
 
         await client.query('COMMIT');
