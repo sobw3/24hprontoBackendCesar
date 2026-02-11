@@ -1858,3 +1858,34 @@ exports.executePhysicalRestock = async (req, res) => {
         client.release();
     }
 };
+
+exports.getStockAudits = async (req, res) => {
+    const { condoId } = req.query;
+    try {
+        let query = `
+            SELECT 
+                sa.*, 
+                p.name as product_name, 
+                p.image_url, 
+                c.name as condo_name
+            FROM stock_audits sa
+            JOIN products p ON sa.product_id = p.id
+            LEFT JOIN condominiums c ON sa.condo_id = c.id
+            WHERE 1=1
+        `;
+        let values = [];
+
+        if (condoId && condoId !== 'all') {
+            query += ` AND sa.condo_id = $1`;
+            values.push(condoId);
+        }
+
+        query += ` ORDER BY sa.created_at DESC`;
+
+        const { rows } = await pool.query(query, values);
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error('Erro ao buscar auditorias:', error);
+        res.status(500).json({ message: 'Erro ao buscar auditorias de estoque.' });
+    }
+};
