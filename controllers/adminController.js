@@ -1578,13 +1578,13 @@ exports.getExpiringProducts = async (req, res) => {
 
 exports.createFinancialTransaction = async (req, res) => {
     try {
-        const { description, amount, type, category, date } = req.body;
+        // Agora aceita condo_id
+        const { description, amount, type, category, date, condo_id } = req.body;
         
-        // Salva no banco
         await pool.query(
-            `INSERT INTO financial_transactions (description, amount, type, category, date) 
-             VALUES ($1, $2, $3, $4, $5)`,
-            [description, parseFloat(amount), type, category, date || new Date()]
+            `INSERT INTO financial_transactions (description, amount, type, category, date, condo_id) 
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [description, parseFloat(amount), type, category, date || new Date(), condo_id || null]
         );
 
         res.status(201).json({ message: 'Lançamento registrado com sucesso!' });
@@ -1609,36 +1609,48 @@ exports.deleteFinancialTransaction = async (req, res) => {
 // --- 3. ESTATÍSTICAS FINANCEIRAS (O CÉREBRO ATUALIZADO) ---
 exports.getFinancialStats = async (req, res) => {
     try {
-        const { period } = req.query;
+        const { period, condoId } = req.query; // Recebe o condoId também
+        
         let dateFilterOrders = "";
         let dateFilterTrans = "";
+        let condoFilterOrders = "";
+        let condoFilterTrans = "";
+        const params = [];
 
-        // Filtro de Data Simples
+        // 1. Filtro de Data
         if (period === '7days') {
             dateFilterOrders = "AND created_at >= NOW() - INTERVAL '7 days'";
             dateFilterTrans = "AND date >= NOW() - INTERVAL '7 days'";
         } else if (period === 'month') {
             dateFilterOrders = "AND created_at >= DATE_TRUNC('month', CURRENT_DATE)";
             dateFilterTrans = "AND date >= DATE_TRUNC('month', CURRENT_DATE)";
-        } else {
-            // Default: Tudo
-            dateFilterOrders = ""; 
-            dateFilterTrans = "";
         }
+
+        // 2. Filtro de Condomínio (Lógica Geral vs Específico)
+        if (condoId && condoId !== 'all') {
+            // Se for específico, adiciona o filtro SQL
+            // Atenção: Usamos injeção direta segura aqui pois é numero ou string controlada, 
+            // mas o ideal é usar $1, $2. Para manter simples no seu padrão atual:
+            condoFilterOrders = `AND condo_id = ${parseInt(condoId)}`; 
+            condoFilterTrans = `AND condo_id = ${parseInt(condoId)}`;
+        }
+        // Se for 'all', condoFilter fica vazio (""), pegando tudo.
 
         // A. Puxa Receita das Vendas (Automático)
         const salesQuery = await pool.query(`
             SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count 
-            FROM orders WHERE status = 'paid' ${dateFilterOrders}
+            FROM orders 
+            WHERE status = 'paid' ${dateFilterOrders} ${condoFilterOrders}
         `);
         const salesRevenue = parseFloat(salesQuery.rows[0].total);
         const salesCount = parseInt(salesQuery.rows[0].count) || 1;
 
         // B. Puxa Despesas Manuais (Tabela nova)
+        // Nota: Se a tabela não tiver condo_id preenchido nos antigos, eles só aparecerão no Geral
         const expensesQuery = await pool.query(`
             SELECT COALESCE(SUM(amount), 0) as total 
             FROM financial_transactions 
-            WHERE type = 'expense' ${dateFilterTrans}
+            WHERE type = 'expense' ${dateFilterTrans} ${condoFilterTrans}
         `);
         const manualExpenses = parseFloat(expensesQuery.rows[0].total);
 
@@ -1646,33 +1658,32 @@ exports.getFinancialStats = async (req, res) => {
         const transactionsList = await pool.query(`
             SELECT id, description, amount, type, category, date 
             FROM financial_transactions 
-            WHERE 1=1 ${dateFilterTrans}
+            WHERE 1=1 ${dateFilterTrans} ${condoFilterTrans}
             ORDER BY date DESC
         `);
 
-        // D. Custo dos Produtos (Estimado ou Real)
-        // Aqui assumimos 40% do valor da venda como custo do produto se não tiver coluna exata
+        // D. Custo dos Produtos (Estimado em 40% se não tiver exato)
         const productCosts = salesRevenue * 0.4; 
 
         // === CÁLCULOS FINAIS ===
-        const totalRevenue = salesRevenue; // + Receitas manuais se tiver
-        const totalExpenses = productCosts + manualExpenses; // Custo Produto + Conta de Luz/Água etc
+        const totalRevenue = salesRevenue; 
+        const totalExpenses = productCosts + manualExpenses;
         const netProfit = totalRevenue - totalExpenses;
         const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0;
         const averageTicket = salesRevenue / salesCount;
 
-        // E. Dados do Gráfico (Misturando Vendas e Despesas)
-        // Simplificado para devolver apenas vendas diárias por enquanto no gráfico
+        // E. Dados do Gráfico
         const chartQuery = await pool.query(`
             SELECT TO_CHAR(created_at, 'DD/MM') as name, SUM(total_amount) as value
-            FROM orders WHERE status = 'paid' ${dateFilterOrders}
+            FROM orders 
+            WHERE status = 'paid' ${dateFilterOrders} ${condoFilterOrders}
             GROUP BY TO_CHAR(created_at, 'DD/MM'), DATE(created_at)
             ORDER BY DATE(created_at) ASC
         `);
 
         res.json({
             revenue: totalRevenue,
-            expenses: totalExpenses, // Agora inclui suas despesas manuais!
+            expenses: totalExpenses,
             profit: netProfit,
             margin: profitMargin,
             ticketAverage: averageTicket,
@@ -1680,15 +1691,15 @@ exports.getFinancialStats = async (req, res) => {
                 labels: chartQuery.rows.map(r => r.name),
                 data: chartQuery.rows.map(r => parseFloat(r.value))
             },
-            transactions: transactionsList.rows // Manda a lista para o frontend
+            transactions: transactionsList.rows
         });
 
     } catch (error) {
         console.error('Erro stats:', error);
-        res.status(500).json({ message: 'Erro interno' });
+        // Se a tabela não existir, avisa no console mas tenta não derrubar tudo (embora o try/catch capture)
+        res.status(500).json({ message: 'Erro ao carregar estatísticas. Verifique se a tabela financial_transactions foi criada.' });
     }
 };
-
 
 exports.getPurchaseHistory = async (req, res) => {
     try {
