@@ -22,7 +22,7 @@ const app = express();
 
 // Configuração de CORS
 const corsOptions = {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: process.env.CORS_ORIGIN || '*',
     optionsSuccessStatus: 200
 };
 
