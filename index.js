@@ -3,6 +3,9 @@ const cors = require('cors');
 require('dotenv').config();
 const ttsRoutes = require('./routes/ttsRoutes');
 
+// Importar seu arquivo de conexão com o banco para o teste
+const pool = require('./db'); 
+
 // Importar TODAS as suas rotas
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -50,6 +53,30 @@ app.use('/api/wallet', walletRoutes);
 app.use('/api/admin/central-cashier', cashierRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/tts', ttsRoutes);
+
+// --- ROTA DE DIAGNÓSTICO DO BANCO (TESTE NA RENDER) ---
+app.get('/test-db', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT NOW() as tempo_atual, current_database() as nome_banco');
+        res.json({ 
+            success: true, 
+            message: "🚀 Backend conectado ao Banco com sucesso!",
+            detalhes: result.rows[0]
+        });
+    } catch (err) {
+        console.error("ERRO NO TEST-DB:", err.message);
+        res.status(500).json({ 
+            success: false, 
+            error: err.message,
+            stack: "Verifique o SSL no seu db.js ou a DATABASE_URL na Render" 
+        });
+    }
+});
+
+// Rota de teste simples
+app.get('/', (req, res) => {
+    res.send('API da SmartFridge Brasil está funcionando!');
+});
 
 const PORT = process.env.PORT || 5000;
 
