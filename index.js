@@ -52,8 +52,15 @@ app.use('/api/user', userRoutes);
 app.use('/api/tts', ttsRoutes);
 
 // Rota de teste
-app.get('/', (req, res) => {
-    res.send('API da SmartFridge Brasil está funcionando!');
+const pool = require('./config/db'); // ajuste o caminho para o seu arquivo de banco
+
+app.get('/test-db', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT NOW()');
+        res.json({ success: true, time: result.rows[0] });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 const PORT = process.env.PORT || 5000;
