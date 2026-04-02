@@ -1,22 +1,21 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const isProduction = process.env.DATABASE_URL;
-
+// Configuração de conexão
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_DATABASE}`,
-  ssl: isProduction 
-    ? { rejectUnauthorized: false } 
-    : false
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? {
+    rejectUnauthorized: false // <--- ESSA LINHA MATA O ERRO "SELF-SIGNED CERTIFICATE"
+  } : false
 });
 
-// Teste imediato de conexão
-pool.connect((err, client, release) => {
-  if (err) {
-    return console.error('❌ ERRO DE CONEXÃO NO DB.JS:', err.stack);
-  }
-  console.log('✅ Conectado ao banco de dados com sucesso!');
-  release();
+// Log de monitoramento no terminal da Render
+pool.on('connect', () => {
+  console.log('✅ Banco de Dados: Conexão estabelecida com sucesso!');
+});
+
+pool.on('error', (err) => {
+  console.error('❌ Banco de Dados: Erro inesperado!', err);
 });
 
 module.exports = pool;
