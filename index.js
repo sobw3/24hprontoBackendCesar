@@ -51,18 +51,6 @@ app.use('/api/admin/central-cashier', cashierRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/tts', ttsRoutes);
 
-// Rota de teste
-const pool = require('./config/db'); // ajuste o caminho para o seu arquivo de banco
-
-app.get('/test-db', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT NOW()');
-        res.json({ success: true, time: result.rows[0] });
-    } catch (err) {
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
