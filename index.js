@@ -56,4 +56,10 @@ app.get('/', (req, res) => {
     res.send('API da SmartFridge Brasil está funcionando!');
 });
 
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+    console.log(`🚀 SUCESSO! Servidor rodando perfeitamente na porta ${PORT}`);
+});
+
 module.exports = app;
