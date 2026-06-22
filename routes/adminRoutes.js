@@ -2,26 +2,27 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
 const ticketController = require('../controllers/ticketController');
-
-// --- CORREÇÃO DO IMPORT (Caminho ajustado para 'middleware' no singular) ---
-const { protectAdmin, verifyToken, isAdmin } = require('../middleware/authMiddleware');
-
+const promotionController = require('../controllers/promotionController');
+const { protectAdmin } = require('../middleware/authMiddleware');
 
 // --- AUTENTICAÇÃO ---
 router.post('/login', adminController.loginAdmin);
 
-// --- DASHBOARD ---
+// --- DASHBOARD / VISÃO GERAL ---
 router.get('/dashboard-stats', protectAdmin, adminController.getDashboardStats);
 router.get('/critical-stock', protectAdmin, adminController.getCriticalStockWidget);
+router.get('/critical-stock-page', protectAdmin, adminController.getCriticalStockPage);
+router.get('/inventory-analysis', protectAdmin, adminController.getInventoryAnalysis);
 router.get('/latest-orders', protectAdmin, adminController.getLatestOrders);
 router.get('/dashboard/expiring-products', protectAdmin, adminController.getExpiringProducts);
+router.get('/promotions/daily', protectAdmin, promotionController.getDailyPromotions);
 
-// --- VENDAS ---
+// --- VENDAS / RELATÓRIOS ---
 router.get('/sales', protectAdmin, adminController.getSalesHistory);
 router.get('/sales/:orderId/items', protectAdmin, adminController.getOrderDetails);
 router.post('/orders/:orderId/refund', protectAdmin, adminController.refundOrder);
 
-// --- CONDOMÍNIOS ---
+// --- PONTOS DE VENDA / CONDOMÍNIOS ---
 router.post('/condominiums', protectAdmin, adminController.createCondominium);
 router.get('/condominiums', protectAdmin, adminController.getCondominiums);
 router.put('/condominiums/:id', protectAdmin, adminController.updateCondominium);
@@ -29,15 +30,16 @@ router.delete('/condominiums/:id', protectAdmin, adminController.deleteCondomini
 
 // --- ESTOQUE E INVENTÁRIO ---
 router.get('/inventory', protectAdmin, adminController.getInventoryByCondo);
+router.post('/inventory', protectAdmin, adminController.updateInventory);
+router.delete('/inventory', protectAdmin, adminController.removeProductFromInventory);
 router.post('/inventory/bulk-update', protectAdmin, adminController.bulkUpdateInventory);
 router.get('/inventory/expiring', protectAdmin, adminController.getExpiringProducts);
-router.get('/purchase-history', adminController.getPurchaseHistory);
-router.post('/inventory/purchase', adminController.registerPurchase);
-router.get('/inventory/pending-restocks', adminController.getPendingRestocks);
-router.post('/inventory/execute-restock', adminController.executePhysicalRestock);
-router.get('/inventory/audits', adminController.getStockAudits);
-router.get('/inventory/audit/:auditId', adminController.getAuditDetails);
-router.post('/inventory', protectAdmin, adminController.updateInventory);
+router.get('/purchase-history', protectAdmin, adminController.getPurchaseHistory);
+router.post('/inventory/purchase', protectAdmin, adminController.registerPurchase);
+router.get('/inventory/pending-restocks', protectAdmin, adminController.getPendingRestocks);
+router.post('/inventory/execute-restock', protectAdmin, adminController.executePhysicalRestock);
+router.get('/inventory/audits', protectAdmin, adminController.getStockAudits);
+router.get('/inventory/audit/:auditId', protectAdmin, adminController.getAuditDetails);
 
 // --- FINANCEIRO ---
 router.get('/financial/stats', protectAdmin, adminController.getFinancialStats);
@@ -49,7 +51,7 @@ router.delete('/finance/expenses/:id', protectAdmin, adminController.deleteExpen
 router.post('/finance/transactions', protectAdmin, adminController.createFinancialTransaction);
 router.delete('/finance/transactions/:id', protectAdmin, adminController.deleteFinancialTransaction);
 
-// --- HARDWARE ---
+// --- HARDWARE / SEGURANÇA OPERACIONAL ---
 router.post('/fridges/:fridgeId/unlock', protectAdmin, adminController.remoteUnlockFridge);
 
 // --- PRODUTOS ---
@@ -70,8 +72,7 @@ router.put('/users/:id', protectAdmin, adminController.updateUserByAdmin);
 router.post('/users/:id/add-balance', protectAdmin, adminController.addWalletBalanceByAdmin);
 router.post('/users/:id/toggle-status', protectAdmin, adminController.toggleUserStatus);
 
-
-// --- SUPORTE (TICKETS) ---
+// --- SUPORTE / AJUDA ---
 router.post('/users/:userId/tickets', protectAdmin, ticketController.createTicketForUser);
 router.get('/users/:userId/tickets', protectAdmin, ticketController.getTicketsForUserByAdmin);
 router.delete('/tickets/:id', protectAdmin, ticketController.deleteTicketByAdmin);
