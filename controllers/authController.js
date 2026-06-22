@@ -83,10 +83,7 @@ exports.register = async (req, res) => {
             email: user.email, 
             cpf: user.cpf, 
             // AQUI ESTÁ A CORREÇÃO:
-            wallet_balance: parseFloat(user.wallet_balance || 0), 
-            credit_limit: user.credit_limit,
-            credit_used: user.credit_used, 
-            credit_due_day: user.credit_due_day
+            wallet_balance: parseFloat(user.wallet_balance || 0)
         };
 
         jwt.sign({ user: payload }, process.env.JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
@@ -130,10 +127,7 @@ exports.login = async (req, res) => {
             email: user.email,
             cpf: user.cpf,
             // AQUI ESTÁ A CORREÇÃO:
-            wallet_balance: parseFloat(user.wallet_balance || 0),
-            credit_limit: user.credit_limit,
-            credit_used: user.credit_used,
-            credit_due_day: user.credit_due_day
+            wallet_balance: parseFloat(user.wallet_balance || 0)
         };
 
         jwt.sign({ user: payload }, process.env.JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
@@ -149,7 +143,7 @@ exports.getMe = async (req, res) => {
     try {
         const userResult = await pool.query(
             // --- CORREÇÃO AQUI: Adicionado 'birth_date' ao SELECT ---
-            'SELECT id, name, email, condo_id, cpf, phone_number, apartment, wallet_balance, credit_limit, credit_used, credit_due_day, birth_date FROM users WHERE id = $1', 
+            'SELECT id, name, email, condo_id, cpf, phone_number, apartment, wallet_balance, birth_date FROM users WHERE id = $1', 
             [req.user.id]
         );
 
