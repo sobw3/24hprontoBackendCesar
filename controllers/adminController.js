@@ -667,34 +667,46 @@ exports.getUsersByCondo = async (req, res) => {
 exports.getUsersByCondoPaginated = async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
-    // --- CONDO ID REMOVIDO DAQUI ---
     const offset = (page - 1) * limit;
 
     try {
-        // --- QUERY CORRIGIDA (Busca TODOS os usuários e junta o nome da máquina) ---
         const usersQuery = `
             SELECT 
                 u.id, u.name, u.cpf, u.email, u.apartment, u.wallet_balance, 
                 u.phone_number, u.is_active, u.birth_date, 
-                c.name as condo_name
+                c.name as condo_name,
+                COALESCE(w.warning_count, 0)::int AS warning_count,
+                COALESCE(w.warnings, '[]'::json) AS warnings
             FROM users u
             LEFT JOIN condominiums c ON u.condo_id = c.id
+            LEFT JOIN (
+                SELECT
+                    user_id,
+                    COUNT(*)::int AS warning_count,
+                    JSON_AGG(
+                        JSON_BUILD_OBJECT(
+                            'id', id,
+                            'severity', severity,
+                            'note', note,
+                            'created_at', created_at,
+                            'created_by', created_by
+                        ) ORDER BY created_at DESC
+                    ) AS warnings
+                FROM user_warnings
+                GROUP BY user_id
+            ) w ON w.user_id = u.id
             ORDER BY u.name ASC 
             LIMIT $1 OFFSET $2
         `;
-        // --- PARÂMETROS CORRIGIDOS (sem condoId) ---
         const usersResult = await pool.query(usersQuery, [limit, offset]);
-        
-        // --- QUERY DE TOTAL CORRIGIDA (Conta TODOS os usuários) ---
         const totalQuery = "SELECT COUNT(*)::int FROM users";
         const totalResult = await pool.query(totalQuery);
-        // --- FIM DA CORREÇÃO ---
 
         res.status(200).json({
             users: usersResult.rows,
             pagination: {
-                page: page,
-                limit: limit,
+                page,
+                limit,
                 total: totalResult.rows[0].count,
                 totalPages: Math.ceil(totalResult.rows[0].count / limit) 
             }
@@ -1089,16 +1101,27 @@ exports.getLatestOrders = async (req, res) => {
 
 exports.remoteUnlockFridge = async (req, res) => {
     const { fridgeId } = req.params;
+    const { reason, condo_id } = req.body || {};
     if (!fridgeId) {
         return res.status(400).json({ message: 'O ID da geladeira é obrigatório.' });
     }
+    if (!reason || String(reason).trim().length < 3) {
+        return res.status(400).json({ message: 'Informe o motivo do destravamento remoto.' });
+    }
     try {
-        await pool.query(
-            'INSERT INTO unlock_commands (fridge_id) VALUES ($1)',
-            [fridgeId]
+        const { rows } = await pool.query(
+            `INSERT INTO unlock_commands (fridge_id, condo_id, reason, admin_identifier)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            [fridgeId, condo_id || null, reason, req.user?.username || req.user?.id || 'admin']
         );
-        console.log(`COMANDO DE DESBLOQUEIO REMOTO GERADO PARA A GELADEIRA: ${fridgeId}`);
-        res.status(200).json({ message: 'Comando de desbloqueio enviado com sucesso!' });
+        await pool.query(
+            `INSERT INTO admin_action_logs (admin_identifier, action, entity_type, entity_id, reason, metadata)
+             VALUES ($1, 'remote_unlock_fridge', 'fridge', $2, $3, $4::jsonb)`,
+            [req.user?.username || req.user?.id || 'admin', fridgeId, reason, JSON.stringify({ condo_id: condo_id || null, command_id: rows[0].id })]
+        ).catch(() => null);
+        console.log(`COMANDO DE DESBLOQUEIO REMOTO GERADO PARA A GELADEIRA: ${fridgeId} | Motivo: ${reason}`);
+        res.status(200).json({ message: 'Comando de desbloqueio enviado com sucesso!', command: rows[0] });
     } catch (error) {
         console.error(`Erro ao enviar comando de desbloqueio remoto para ${fridgeId}:`, error);
         res.status(500).json({ message: 'Erro interno ao enviar comando.' });
