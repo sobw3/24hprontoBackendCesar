@@ -5,6 +5,7 @@ const ttsRoutes = require('./routes/ttsRoutes');
 
 // Importar seu arquivo de conexão com o banco para o teste
 const pool = require('./db'); 
+const { ensureSmartSchema } = require('./utils/smartSchema');
 
 // Importar TODAS as suas rotas
 const authRoutes = require('./routes/auth');
@@ -22,6 +23,16 @@ const userRoutes = require('./routes/userRoutes');
 const promotionScheduler = require('./services/promotionScheduler');
 
 const app = express();
+
+
+// Garante que as tabelas/colunas novas do painel inteligente existam.
+// É idempotente: pode rodar em produção sem apagar dados.
+ensureSmartSchema(pool)
+    .then(() => {
+        console.log('✅ Schema inteligente verificado/atualizado.');
+        promotionScheduler.start();
+    })
+    .catch(err => console.error('⚠️ Falha ao verificar schema inteligente:', err.message));
 
 // Configuração de CORS
 const corsOptions = {

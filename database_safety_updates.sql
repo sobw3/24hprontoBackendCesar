@@ -1,53 +1,174 @@
--- Atualizações seguras para bases antigas do SmartFridge/Daniel Marques Market
--- Execute apenas se seu banco ainda não tiver alguma coluna/tabela usada pelo sistema.
+-- database_safety_updates.sql
+-- Atualizações seguras para o backend inteligente do mercado autônomo.
+-- Pode executar no banco de produção: usa IF NOT EXISTS e não apaga dados.
 
-ALTER TABLE condominiums ADD COLUMN IF NOT EXISTS fridge_id VARCHAR(255);
-ALTER TABLE condominiums ADD COLUMN IF NOT EXISTS monthly_fixed_cost NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE IF EXISTS condominiums ADD COLUMN IF NOT EXISTS fridge_id VARCHAR(255);
+ALTER TABLE IF EXISTS condominiums ADD COLUMN IF NOT EXISTS monthly_fixed_cost NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE IF EXISTS condominiums ADD COLUMN IF NOT EXISTS initial_investment NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE IF EXISTS condominiums ADD COLUMN IF NOT EXISTS syndic_profit_percentage NUMERIC(7,4) DEFAULT 0;
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS apartment VARCHAR(50);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS apartment VARCHAR(50);
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30);
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0;
 
-ALTER TABLE products ADD COLUMN IF NOT EXISTS promotional_price NUMERIC(10,2);
-ALTER TABLE products ADD COLUMN IF NOT EXISTS promotion_start_date TIMESTAMP WITH TIME ZONE;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS promotion_end_date TIMESTAMP WITH TIME ZONE;
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS category VARCHAR(120) DEFAULT 'Outros';
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE;
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS promotional_price NUMERIC(12,2);
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS promotion_start_date TIMESTAMP WITH TIME ZONE;
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS promotion_end_date TIMESTAMP WITH TIME ZONE;
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS auto_promo_excluded BOOLEAN DEFAULT FALSE;
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS auto_promo_discount_profit_percent NUMERIC(7,4);
 
-ALTER TABLE inventory ADD COLUMN IF NOT EXISTS nearest_expiration_date DATE;
+ALTER TABLE IF EXISTS inventory ADD COLUMN IF NOT EXISTS nearest_expiration_date DATE;
+ALTER TABLE IF EXISTS inventory ADD COLUMN IF NOT EXISTS last_restock_at TIMESTAMP WITH TIME ZONE;
 
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS fridge_id VARCHAR(255);
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS door_opened_at TIMESTAMP WITH TIME ZONE;
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_gateway_id VARCHAR(255);
+ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50);
+ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS fridge_id VARCHAR(255);
+ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS door_opened_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE IF EXISTS orders ADD COLUMN IF NOT EXISTS payment_gateway_id VARCHAR(255);
 
-ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cost_at_purchase NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE IF EXISTS order_items ADD COLUMN IF NOT EXISTS cost_at_purchase NUMERIC(12,2) DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS unlock_commands (
-    id SERIAL PRIMARY KEY,
-    fridge_id VARCHAR(255) NOT NULL,
-    order_id INTEGER NULL,
-    is_processed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP WITH TIME ZONE
+  id SERIAL PRIMARY KEY,
+  fridge_id VARCHAR(255) NOT NULL,
+  order_id INTEGER NULL,
+  condo_id INTEGER NULL,
+  reason TEXT,
+  admin_identifier VARCHAR(255),
+  is_processed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  processed_at TIMESTAMP WITH TIME ZONE
 );
 
 CREATE TABLE IF NOT EXISTS operating_expenses (
-    id SERIAL PRIMARY KEY,
-    condo_id INTEGER REFERENCES condominiums(id) ON DELETE CASCADE,
-    description TEXT NOT NULL,
-    amount NUMERIC(10,2) NOT NULL DEFAULT 0,
-    due_date DATE,
-    status VARCHAR(30) DEFAULT 'pending',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  id SERIAL PRIMARY KEY,
+  condo_id INTEGER REFERENCES condominiums(id) ON DELETE SET NULL,
+  description TEXT NOT NULL,
+  amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+  due_date DATE,
+  status VARCHAR(30) DEFAULT 'pending',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS admin_action_logs (
-    id SERIAL PRIMARY KEY,
-    admin_identifier VARCHAR(255),
-    action VARCHAR(100) NOT NULL,
-    entity_type VARCHAR(100),
-    entity_id VARCHAR(100),
-    reason TEXT,
-    metadata JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  id SERIAL PRIMARY KEY,
+  admin_identifier VARCHAR(255),
+  action VARCHAR(100) NOT NULL,
+  entity_type VARCHAR(100),
+  entity_id VARCHAR(100),
+  reason TEXT,
+  metadata JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS smart_finance_configs (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  condo_id INTEGER REFERENCES condominiums(id) ON DELETE SET NULL,
+  investment NUMERIC(12,2) DEFAULT 10549,
+  cogs_rate NUMERIC(7,4) DEFAULT 62,
+  fixed_costs NUMERIC(12,2) DEFAULT 349.90,
+  fees_rate NUMERIC(7,4) DEFAULT 4.99,
+  commission_rate NUMERIC(7,4) DEFAULT 0,
+  extra_losses NUMERIC(12,2) DEFAULT 0,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS auto_promotion_settings (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  enabled BOOLEAN DEFAULT FALSE,
+  max_products INTEGER DEFAULT 4 CHECK (max_products BETWEEN 1 AND 7),
+  default_discount_profit_percent NUMERIC(7,4) DEFAULT 35,
+  excluded_product_ids INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+  product_discounts JSONB DEFAULT '{}'::JSONB,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS auto_promotion_runs (
+  id SERIAL PRIMARY KEY,
+  run_date DATE DEFAULT CURRENT_DATE,
+  product_ids INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+  metadata JSONB DEFAULT '{}'::JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS supply_records (
+  id SERIAL PRIMARY KEY,
+  condo_id INTEGER REFERENCES condominiums(id) ON DELETE SET NULL,
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  supplier TEXT,
+  unit_cost NUMERIC(12,2) DEFAULT 0,
+  total_cost NUMERIC(12,2) DEFAULT 0,
+  expires_at DATE,
+  invoice TEXT,
+  created_by VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS audit_inconsistencies (
+  id SERIAL PRIMARY KEY,
+  condo_id INTEGER REFERENCES condominiums(id) ON DELETE SET NULL,
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  expected_quantity INTEGER NOT NULL DEFAULT 0,
+  counted_quantity INTEGER NOT NULL DEFAULT 0,
+  difference INTEGER NOT NULL DEFAULT 0,
+  estimated_loss NUMERIC(12,2) DEFAULT 0,
+  last_restock_at TIMESTAMP WITH TIME ZONE,
+  suspect_sales JSONB DEFAULT '[]'::JSONB,
+  status VARCHAR(40) DEFAULT 'open',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS loss_records (
+  id SERIAL PRIMARY KEY,
+  type VARCHAR(60) DEFAULT 'perda',
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  product_name TEXT,
+  quantity INTEGER DEFAULT 1,
+  value NUMERIC(12,2) DEFAULT 0,
+  reason TEXT,
+  customer_note TEXT,
+  status VARCHAR(60) DEFAULT 'em_analise',
+  related_inconsistency_id INTEGER REFERENCES audit_inconsistencies(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS purchase_records (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  product_name TEXT,
+  supplier TEXT,
+  unit_cost NUMERIC(12,2) DEFAULT 0,
+  quantity INTEGER DEFAULT 0,
+  total NUMERIC(12,2) DEFAULT 0,
+  invoice TEXT,
+  bought_at DATE DEFAULT CURRENT_DATE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_warnings (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  severity VARCHAR(60) DEFAULT 'observacao',
+  note TEXT NOT NULL,
+  created_by VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO smart_finance_configs (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+INSERT INTO auto_promotion_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Garantia para bases que já possuíam versões antigas dessas tabelas:
+ALTER TABLE IF EXISTS unlock_commands ADD COLUMN IF NOT EXISTS condo_id INTEGER NULL;
+ALTER TABLE IF EXISTS unlock_commands ADD COLUMN IF NOT EXISTS reason TEXT;
+ALTER TABLE IF EXISTS unlock_commands ADD COLUMN IF NOT EXISTS admin_identifier VARCHAR(255);
+ALTER TABLE IF EXISTS unlock_commands ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE IF EXISTS operating_expenses ADD COLUMN IF NOT EXISTS due_date DATE;
+ALTER TABLE IF EXISTS operating_expenses ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'pending';
+ALTER TABLE IF EXISTS operating_expenses ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+ALTER TABLE IF EXISTS admin_action_logs ADD COLUMN IF NOT EXISTS metadata JSONB;
+ALTER TABLE IF EXISTS admin_action_logs ADD COLUMN IF NOT EXISTS reason TEXT;
