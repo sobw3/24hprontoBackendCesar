@@ -3,6 +3,7 @@ const router = express.Router();
 const adminController = require('../controllers/adminController');
 const ticketController = require('../controllers/ticketController');
 const promotionController = require('../controllers/promotionController');
+const intelligenceController = require('../controllers/intelligenceController');
 const { protectAdmin } = require('../middleware/authMiddleware');
 
 // --- AUTENTICAÇÃO ---
@@ -71,6 +72,26 @@ router.get('/users-by-condo', protectAdmin, adminController.getUsersByCondo);
 router.put('/users/:id', protectAdmin, adminController.updateUserByAdmin);
 router.post('/users/:id/add-balance', protectAdmin, adminController.addWalletBalanceByAdmin);
 router.post('/users/:id/toggle-status', protectAdmin, adminController.toggleUserStatus);
+
+
+// --- INTELIGÊNCIA DO FRANQUEADO / NOVO PAINEL MOBILE ---
+router.get('/operations/summary', protectAdmin, intelligenceController.getOperationsSummary);
+router.get('/finance/smart-dre', protectAdmin, intelligenceController.getSmartDre);
+router.post('/finance/smart-config', protectAdmin, intelligenceController.saveSmartFinanceConfig);
+router.get('/promotions/automation', protectAdmin, intelligenceController.getPromotionAutomation);
+router.post('/promotions/automation', protectAdmin, intelligenceController.savePromotionAutomation);
+router.post('/promotions/automation/run-today', protectAdmin, intelligenceController.runTodayPromotions);
+router.get('/audit/suspect-sales', protectAdmin, intelligenceController.getSuspectSales);
+router.get('/supply-records', protectAdmin, intelligenceController.getSupplyRecords);
+router.post('/supply-records', protectAdmin, intelligenceController.createSupplyRecord);
+router.get('/audit/inconsistencies', protectAdmin, intelligenceController.getInconsistencies);
+router.post('/audit/inconsistencies', protectAdmin, intelligenceController.createInconsistency);
+router.get('/losses', protectAdmin, intelligenceController.getLosses);
+router.post('/losses', protectAdmin, intelligenceController.createLoss);
+router.get('/purchases', protectAdmin, intelligenceController.getPurchases);
+router.post('/purchases', protectAdmin, intelligenceController.createPurchase);
+router.get('/users/:id/warnings', protectAdmin, intelligenceController.getUserWarnings);
+router.post('/users/:id/warnings', protectAdmin, intelligenceController.createUserWarning);
 
 // --- SUPORTE / AJUDA ---
 router.post('/users/:userId/tickets', protectAdmin, ticketController.createTicketForUser);

@@ -6,6 +6,7 @@ const { protect } = require('../middleware/authMiddleware'); // Importar protect
 // Rota para buscar todos os condomínios disponíveis para o cadastro
 // GET /api/public/condominiums
 router.get('/condominiums', publicController.getAvailableCondominiums);
+router.get('/promotions/daily', publicController.getPublicDailyPromotions);
 
 // PONTO 6: Nova rota para validar o ID da geladeira (protegida)
 router.post('/validate-fridge', protect, publicController.validateFridgeId);
