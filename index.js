@@ -73,6 +73,12 @@ app.get('/test-db', async (req, res) => {
     }
 });
 
+
+// Rota de saúde para deploy/monitoramento
+app.get('/health', (req, res) => {
+    res.status(200).json({ ok: true, service: 'smartfridge-backend', timestamp: new Date().toISOString() });
+});
+
 // Rota de teste simples
 app.get('/', (req, res) => {
     res.send('API da SmartFridge Brasil está funcionando!');
