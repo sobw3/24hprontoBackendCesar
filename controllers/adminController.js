@@ -667,46 +667,35 @@ exports.getUsersByCondo = async (req, res) => {
 exports.getUsersByCondoPaginated = async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
+    // --- CONDO ID REMOVIDO DAQUI ---
     const offset = (page - 1) * limit;
 
     try {
+        // --- QUERY CORRIGIDA (Busca TODOS os usuários e junta o nome da máquina) ---
         const usersQuery = `
             SELECT 
                 u.id, u.name, u.cpf, u.email, u.apartment, u.wallet_balance, 
-                u.phone_number, u.is_active, u.birth_date, 
-                c.name as condo_name,
-                COALESCE(w.warning_count, 0)::int AS warning_count,
-                COALESCE(w.warnings, '[]'::json) AS warnings
+                u.phone_number, u.credit_limit, u.credit_used, u.credit_due_day, 
+                u.is_active, u.birth_date, 
+                c.name as condo_name
             FROM users u
             LEFT JOIN condominiums c ON u.condo_id = c.id
-            LEFT JOIN (
-                SELECT
-                    user_id,
-                    COUNT(*)::int AS warning_count,
-                    JSON_AGG(
-                        JSON_BUILD_OBJECT(
-                            'id', id,
-                            'severity', severity,
-                            'note', note,
-                            'created_at', created_at,
-                            'created_by', created_by
-                        ) ORDER BY created_at DESC
-                    ) AS warnings
-                FROM user_warnings
-                GROUP BY user_id
-            ) w ON w.user_id = u.id
             ORDER BY u.name ASC 
             LIMIT $1 OFFSET $2
         `;
+        // --- PARÂMETROS CORRIGIDOS (sem condoId) ---
         const usersResult = await pool.query(usersQuery, [limit, offset]);
+        
+        // --- QUERY DE TOTAL CORRIGIDA (Conta TODOS os usuários) ---
         const totalQuery = "SELECT COUNT(*)::int FROM users";
         const totalResult = await pool.query(totalQuery);
+        // --- FIM DA CORREÇÃO ---
 
         res.status(200).json({
             users: usersResult.rows,
             pagination: {
-                page,
-                limit,
+                page: page,
+                limit: limit,
                 total: totalResult.rows[0].count,
                 totalPages: Math.ceil(totalResult.rows[0].count / limit) 
             }
@@ -767,8 +756,8 @@ exports.addWalletBalanceByAdmin = async (req, res) => {
         if (parsedAmount > 0) {
             // Se for um depósito (positivo)
             transactionType = 'deposit';
-            description = `Saldo administrativo: ${reason || 'Adicionado pelo administrador'}`;
-            ticketMessage = `Você recebeu um ajuste positivo de saldo de R$ ${parsedAmount.toFixed(2).replace('.',',')}. Motivo: ${reason || 'Saldo administrativo'}`;
+            description = `Crédito administrativo: ${reason || 'Adicionado pelo administrador'}`;
+            ticketMessage = `Você recebeu um crédito de R$ ${parsedAmount.toFixed(2).replace('.',',')} do administrador. Motivo: ${reason || 'Crédito administrativo'}`;
         } else {
             // Se for um débito (negativo)
             transactionType = 'transfer_out'; 
@@ -1101,27 +1090,16 @@ exports.getLatestOrders = async (req, res) => {
 
 exports.remoteUnlockFridge = async (req, res) => {
     const { fridgeId } = req.params;
-    const { reason, condo_id } = req.body || {};
     if (!fridgeId) {
         return res.status(400).json({ message: 'O ID da geladeira é obrigatório.' });
     }
-    if (!reason || String(reason).trim().length < 3) {
-        return res.status(400).json({ message: 'Informe o motivo do destravamento remoto.' });
-    }
     try {
-        const { rows } = await pool.query(
-            `INSERT INTO unlock_commands (fridge_id, condo_id, reason, admin_identifier)
-             VALUES ($1, $2, $3, $4)
-             RETURNING *`,
-            [fridgeId, condo_id || null, reason, req.user?.username || req.user?.id || 'admin']
-        );
         await pool.query(
-            `INSERT INTO admin_action_logs (admin_identifier, action, entity_type, entity_id, reason, metadata)
-             VALUES ($1, 'remote_unlock_fridge', 'fridge', $2, $3, $4::jsonb)`,
-            [req.user?.username || req.user?.id || 'admin', fridgeId, reason, JSON.stringify({ condo_id: condo_id || null, command_id: rows[0].id })]
-        ).catch(() => null);
-        console.log(`COMANDO DE DESBLOQUEIO REMOTO GERADO PARA A GELADEIRA: ${fridgeId} | Motivo: ${reason}`);
-        res.status(200).json({ message: 'Comando de desbloqueio enviado com sucesso!', command: rows[0] });
+            'INSERT INTO unlock_commands (fridge_id) VALUES ($1)',
+            [fridgeId]
+        );
+        console.log(`COMANDO DE DESBLOQUEIO REMOTO GERADO PARA A GELADEIRA: ${fridgeId}`);
+        res.status(200).json({ message: 'Comando de desbloqueio enviado com sucesso!' });
     } catch (error) {
         console.error(`Erro ao enviar comando de desbloqueio remoto para ${fridgeId}:`, error);
         res.status(500).json({ message: 'Erro interno ao enviar comando.' });
@@ -1440,142 +1418,102 @@ exports.refundDeposit = async (req, res) => {
 
 exports.getSalesHistory = async (req, res) => {
     const { startDate, endDate, condoId, status, search, page = 1, limit = 10 } = req.query;
-    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
-    const offset = (pageNum - 1) * limitNum;
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
     try {
+        // 1. Construção Dinâmica do WHERE
         let whereClause = "WHERE 1=1";
         const params = [];
         let paramIndex = 1;
 
+        // Filtro de Data (OPCIONAL AGORA)
         if (startDate && endDate) {
-            whereClause += ` AND (o.created_at AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+            whereClause += ` AND (o.created_at AT TIME ZONE 'America/Sao_Paulo') BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
             params.push(startDate, endDate);
             paramIndex += 2;
         }
 
+        // Filtro de Condomínio
         if (condoId && condoId !== 'all') {
             whereClause += ` AND o.condo_id = $${paramIndex}`;
             params.push(condoId);
             paramIndex++;
         }
 
+        // Filtro de Status
         if (status && status !== 'all') {
             whereClause += ` AND o.status = $${paramIndex}`;
             params.push(status);
             paramIndex++;
         }
 
+        // Busca por Texto
         if (search) {
-            whereClause += ` AND (u.name ILIKE $${paramIndex} OR u.cpf ILIKE $${paramIndex} OR o.id::text = $${paramIndex})`;
+            whereClause += ` AND (u.name ILIKE $${paramIndex} OR o.id::text = $${paramIndex})`;
             params.push(`%${search}%`);
             paramIndex++;
         }
 
+        // 2. QUERY DE DADOS (Paginada)
         const dataQuery = `
             SELECT 
-                o.id,
-                o.total_amount::float AS amount,
-                o.total_amount::float AS total_amount,
-                o.status,
-                o.payment_method,
-                o.created_at,
+                o.id, 
+                o.total_amount, 
+                o.status, 
+                o.created_at, 
                 o.door_opened_at,
-                u.name AS user_name,
-                u.email AS user_email,
-                u.cpf AS user_cpf,
-                c.name AS condo_name,
-                COALESCE(SUM(oi.quantity * (oi.price_at_purchase - COALESCE(oi.cost_at_purchase, p.purchase_price, 0))), 0)::float AS net_profit,
-                COALESCE(
-                    json_agg(
-                        json_build_object(
-                            'product_id', p.id,
-                            'product_name', p.name,
-                            'quantity', oi.quantity,
-                            'price', oi.price_at_purchase,
-                            'price_at_purchase', oi.price_at_purchase,
-                            'cost_at_purchase', COALESCE(oi.cost_at_purchase, p.purchase_price, 0),
-                            'image_url', p.image_url
-                        )
-                        ORDER BY p.name
-                    ) FILTER (WHERE oi.id IS NOT NULL),
-                    '[]'::json
-                ) AS items
+                u.name as user_name, 
+                u.email as user_email,
+                c.name as condo_name,
+                (SELECT string_agg(p.name, ', ') 
+                 FROM order_items oi 
+                 JOIN products p ON oi.product_id = p.id 
+                 WHERE oi.order_id = o.id) as product_summary
             FROM orders o
             JOIN users u ON o.user_id = u.id
             LEFT JOIN condominiums c ON o.condo_id = c.id
-            LEFT JOIN order_items oi ON oi.order_id = o.id
-            LEFT JOIN products p ON p.id = oi.product_id
             ${whereClause}
-            GROUP BY o.id, u.name, u.email, u.cpf, c.name
             ORDER BY o.created_at DESC
-            LIMIT $${paramIndex} OFFSET $${paramIndex + 1};
+            LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
         `;
 
-        const countQuery = `
-            SELECT COUNT(*)::int AS total_count
+        // 3. QUERY DE CONTAGEM E TOTAIS (Para Paginação e KPIs)
+        const summaryQuery = `
+            SELECT 
+                COUNT(*) as total_count,
+                COALESCE(SUM(total_amount), 0) as total_revenue
             FROM orders o
             JOIN users u ON o.user_id = u.id
             LEFT JOIN condominiums c ON o.condo_id = c.id
-            ${whereClause};
+            ${whereClause}
         `;
 
-        const summaryQuery = `
-            WITH filtered_orders AS (
-                SELECT o.id, o.total_amount, o.status
-                FROM orders o
-                JOIN users u ON o.user_id = u.id
-                LEFT JOIN condominiums c ON o.condo_id = c.id
-                ${whereClause}
-            ), profit_by_order AS (
-                SELECT
-                    fo.id,
-                    COALESCE(SUM(oi.quantity * (oi.price_at_purchase - COALESCE(oi.cost_at_purchase, p.purchase_price, 0))), 0)::float AS net_profit
-                FROM filtered_orders fo
-                LEFT JOIN order_items oi ON oi.order_id = fo.id
-                LEFT JOIN products p ON p.id = oi.product_id
-                GROUP BY fo.id
-            )
-            SELECT
-                COUNT(CASE WHEN fo.status = 'paid' THEN 1 END)::int AS total_orders,
-                COALESCE(SUM(CASE WHEN fo.status = 'paid' THEN fo.total_amount ELSE 0 END), 0)::float AS total_revenue,
-                COALESCE(SUM(CASE WHEN fo.status = 'refunded' THEN fo.total_amount ELSE 0 END), 0)::float AS total_refunded,
-                COALESCE(SUM(CASE WHEN fo.status = 'paid' THEN pbo.net_profit ELSE 0 END), 0)::float AS total_net_profit
-            FROM filtered_orders fo
-            LEFT JOIN profit_by_order pbo ON pbo.id = fo.id;
-        `;
-
-        const [dataResult, countResult, summaryResult] = await Promise.all([
-            pool.query(dataQuery, [...params, limitNum, offset]),
-            pool.query(countQuery, params),
-            pool.query(summaryQuery, params)
+        // Executa em paralelo
+        const [dataResult, summaryResult] = await Promise.all([
+            pool.query(dataQuery, [...params, limit, offset]),
+            pool.query(summaryQuery, params) // Usa os mesmos params do WHERE, sem limit/offset
         ]);
 
-        const totalItems = parseInt(countResult.rows[0]?.total_count || 0, 10);
-        const totalPages = Math.max(Math.ceil(totalItems / limitNum), 1);
-        const summary = summaryResult.rows[0] || {};
-        const pagination = {
-            currentPage: pageNum,
-            totalPages,
-            totalItems,
-            itemsPerPage: limitNum,
-            page: pageNum,
-            limit: limitNum,
-            total: totalItems
-        };
+        const totalItems = parseInt(summaryResult.rows[0].total_count);
+        const totalRevenue = parseFloat(summaryResult.rows[0].total_revenue);
+        const totalPages = Math.ceil(totalItems / limit);
 
-        // Formato novo do frontend premium + formato legado para telas antigas.
+        // Retorna formato completo com metadados
         res.json({
-            log: dataResult.rows,
-            summary,
-            pagination,
             data: dataResult.rows,
-            meta: { ...pagination, totalRevenue: summary.total_revenue || 0 }
+            meta: {
+                currentPage: parseInt(page),
+                totalPages: totalPages,
+                totalItems: totalItems,
+                itemsPerPage: parseInt(limit),
+                totalRevenue: totalRevenue // Envia o total financeiro real do filtro
+            }
         });
+
     } catch (error) {
-        console.error('Erro no histórico de vendas:', error);
-        res.status(500).json({ message: 'Erro ao buscar vendas.' });
+        console.error("Erro no histórico de vendas:", error);
+        res.status(500).json({ message: "Erro ao buscar vendas." });
     }
 };
 

@@ -26,7 +26,7 @@ exports.getUserHistory = async (req, res) => {
 
         // Para cada transação de compra, buscar os itens
         for (const tx of transactions) {
-            if (tx.type === 'purchase' && tx.related_order_id) {
+            if ((tx.type === 'purchase' || tx.type === 'credit_purchase') && tx.related_order_id) {
                 
                 // --- INÍCIO DA ALTERAÇÃO ---
                 // Adicionamos 'p.image_url' ao SELECT
@@ -46,8 +46,11 @@ exports.getUserHistory = async (req, res) => {
         // Query para contagem total (sem alteração)
         const totalQuery = `
             SELECT COUNT(*)::int 
-            FROM wallet_transactions
-            WHERE user_id = $1;
+            FROM (
+                SELECT id FROM wallet_transactions WHERE user_id = $1
+                UNION ALL
+                SELECT id FROM wallet_transactions WHERE user_id = $1 AND type = 'invoice_payment'
+            ) AS total;
         `;
         const totalResult = await pool.query(totalQuery, [userId]);
 

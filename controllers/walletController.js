@@ -323,7 +323,7 @@ exports.getTransactionDetails = async (req, res) => {
         
         let transactionDetails = rows[0];
 
-        if (transactionDetails.type === 'purchase' && transactionDetails.related_order_id) {
+        if ((transactionDetails.type === 'purchase' || transactionDetails.type === 'credit_purchase') && transactionDetails.related_order_id) {
             const itemsQuery = `
                 SELECT oi.quantity, oi.price_at_purchase, p.name as product_name, p.id as product_id
                 FROM order_items oi
