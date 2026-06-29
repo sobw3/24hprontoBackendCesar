@@ -5,13 +5,13 @@ const ttsRoutes = require('./routes/ttsRoutes');
 
 // Importar seu arquivo de conexão com o banco para o teste
 const pool = require('./db'); 
-const { ensureSmartSchema } = require('./utils/smartSchema');
 
 // Importar TODAS as suas rotas
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
 const orderRoutes = require('./routes/orderRoutes');
 const webhookRoutes = require('./routes/webhookRoutes');
+const cieloRoutes = require('./routes/cieloRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const publicRoutes = require('./routes/publicRoutes');
 const fridgeRoutes = require('./routes/fridgeRoutes');
@@ -23,16 +23,6 @@ const userRoutes = require('./routes/userRoutes');
 const promotionScheduler = require('./services/promotionScheduler');
 
 const app = express();
-
-
-// Garante que as tabelas/colunas novas do painel inteligente existam.
-// É idempotente: pode rodar em produção sem apagar dados.
-ensureSmartSchema(pool)
-    .then(() => {
-        console.log('✅ Schema inteligente verificado/atualizado.');
-        promotionScheduler.start();
-    })
-    .catch(err => console.error('⚠️ Falha ao verificar schema inteligente:', err.message));
 
 // Configuração de CORS
 const corsOptions = {
@@ -57,6 +47,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/cielo', cieloRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/fridge', fridgeRoutes);
@@ -82,12 +73,6 @@ app.get('/test-db', async (req, res) => {
             stack: "Verifique o SSL no seu db.js ou a DATABASE_URL na Render" 
         });
     }
-});
-
-
-// Rota de saúde para deploy/monitoramento
-app.get('/health', (req, res) => {
-    res.status(200).json({ ok: true, service: 'smartfridge-backend', timestamp: new Date().toISOString() });
 });
 
 // Rota de teste simples
